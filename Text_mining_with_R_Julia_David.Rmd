@@ -1,0 +1,42 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+suppressMessages({
+  if(!require(topicmodels))
+    install.packages("topicmodels", repos = "http://cran.us.r-project.org")
+  library(topicmodels)
+  
+})
+
+
+data("AssociatedPress")
+AssociatedPress
+```
+
+```{r}
+# set a seed so that the output of the model is predictable
+ap_lda <- LDA(AssociatedPress, k = 2, control = list(seed = 1234))
+ap_lda
+```
+
+
+```{r}
+suppressMessages({
+  if(!require(tidytext))
+    install.packages("tidytext", repos = "http://cran.us.r-project.org")
+  library(tidytext)
+})
+
+
+ap_topics <- tidy(ap_lda, matrix = "beta")
+ap_topics
+```
+
+
+```{r}
+
+```
+
