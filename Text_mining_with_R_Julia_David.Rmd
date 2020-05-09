@@ -2,6 +2,575 @@
 title: "R Notebook"
 output: html_notebook
 ---
+08/05/2020
+
+```{r}
+library(dplyr)
+library(tidytext)
+library(readtext)
+library(magrittr)
+library(tidyr)
+
+```
+
+```{r}
+wd <- getwd()
+path1 <- file.path(wd, "Homo Deus_ A Brief History of T - Yuval Noah Harari.txt")
+path2 <- file.path(wd,"Sapiens_ A Brief History of Hum - Yuval Noah Harari.txt")
+path3 <- file.path(wd, "21 Lessons for the 21st Century - Yuval Noah Harari.txt")
+
+homo <- readtext(path1)  
+sapiens <- readtext(path2)
+lessons <- readtext(path3)
+
+yuval_books <- bind_rows(homo, sapiens, lessons)
+yuval_books %<>% mutate(book = case_when(doc_id == "Homo Deus_ A Brief History of T - Yuval Noah Harari.txt" ~ "homo_dues",
+                                         doc_id == "Sapiens_ A Brief History of Hum - Yuval Noah Harari.txt" ~ "sapiens",
+                                         doc_id == "21 Lessons for the 21st Century - Yuval Noah Harari.txt" ~ "21_lessons")) %>%
+  select(-doc_id)
+  
+
+head(yuval_books)
+
+```
+
+```{r}
+yuval_bigram <- yuval_books %>% unnest_tokens(bigram, text, token = "ngrams", n = 2)
+```
+
+```{r}
+head(yuval_bigram)
+tail(yuval_bigram)
+```
+
+```{r}
+yuval_bigram %>% count(bigram, sort = TRUE)
+```
+
+```{r}
+bigram_separated <- yuval_bigram %>% separate(bigram, c("word1", "word2"), sep = " ")
+
+bigram_filtered <- bigram_separated %>% filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+bigram_counted <- bigram_filtered %>%
+  count(word1, word2, sort = TRUE)
+bigram_counted
+```
+
+```{r}
+bigram_united <- bigram_filtered %>% unite(bigram, word1, word2, sep = " ")
+bigram_united
+```
+
+```{r}
+trigram_filtered <- yuval_books %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word,
+         !word3 %in% stop_words$word)
+
+trigram_filtered %>% count(word1, word2, word3, sort = TRUE)
+
+trigram_united <- trigram_filtered %>% unite(trigram, word1, word2, word3, sep = " ")
+
+trigram_united
+```
+
+```{r}
+trigram_filtered %>%
+  filter(word2 == "future") %>%
+  count(book, word1, sort = TRUE)
+```
+
+```{r}
+trigram_filtered %>%
+  filter(word2 == "present") %>%
+  count(book, word1, sort = TRUE)
+```
+
+```{r}
+monogram_filtered <- yuval_books %>%
+  unnest_tokens(monogram, text, token = "ngrams", n = 1) %>%
+  filter(!monogram %in% stop_words$word)
+```
+
+```{r}
+monogram_filtered %>%
+  filter(monogram == "future") %>%
+  count(book, monogram, sort = TRUE)
+```
+
+```{r}
+bigram_tf_idf <- bigram_united %>%
+  count(book, bigram) %>%
+  bind_tf_idf(bigram, book, n) %>%
+  arrange(desc(tf_idf))
+
+bigram_tf_idf
+```
+
+```{r}
+trigram_tf_idf <- trigram_united %>%
+  count(book, trigram) %>%
+  bind_tf_idf(trigram, book, n) %>%
+  arrange(desc(tf_idf))
+
+trigram_tf_idf
+```
+
+```{r}
+bigram_separated %>%
+  filter(word1 == "not") %>%
+  count(word1, word2, sort = TRUE)
+```
+```{r}
+AFINN <- get_sentiments("afinn")
+
+AFINN
+```
+
+```{r}
+not_words <- bigram_separated %>%
+  filter(word1 == "not") %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>%
+  count(word2, value, sort = TRUE)
+
+not_words
+```
+
+```{r}
+library(ggplot2)
+
+not_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(20) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(word2, n * value, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  xlab("Words preceded by \"not\"") +
+  ylab("Sentiment value * number of occurrences") +
+  coord_flip()
+```
+
+```{r}
+negation_words <- c("not", "no", "never", "without")
+
+negated_words <- bigram_separated %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+
+negated_words
+```
+
+```{r}
+library(igraph)
+
+# original counts
+bigram_counted
+```
+
+```{r}
+# filter for only relatively common combinations
+bigram_graph <- bigram_counted %>%
+  filter(n > 20) %>%
+  graph_from_data_frame()
+
+bigram_graph
+```
+
+```{r}
+library(ggraph)
+set.seed(2017)
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+
+```{r}
+set.seed(2016)
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+-----
+29/04/2020 - 07/05/2020
+
+```{r}
+
+```
+
+
+```{r}
+library(quanteda)
+library(readtext)
+library(tidytext)
+library(tidyverse)
+```
+
+
+
+```{r}
+#path1 <- "C:\\Users\\E7470\\Calibre Library\\Yuval Noah Harari\\Homo Deus_ A Brief History of Tomor (663)\\Homo Deus_ A Brief History of T - Yuval Noah Harari.txt"
+#path2 <- "C:\\Users\\E7470\\Calibre Library\\Yuval Noah Harari\\Sapiens_ A Brief History of Humanki (353)\\Sapiens_ A Brief History of Hum - Yuval Noah Harari.txt"
+#path3 <- "C:\\Users\\E7470\\Calibre Library\\Yuval Noah Harari\\21 Lessons for the 21st Century (664)\\21 Lessons for the 21st Century - Yuval Noah Harari.txt"
+
+path1 <- "C:\\Tran Phu Hoa workspace\\1. Current\\1_NLP\\Natural-Language-Processing\\Homo Deus_ A Brief History of T - Yuval Noah Harari.txt"
+path2 <- "C:\\Tran Phu Hoa workspace\\1. Current\\1_NLP\\Natural-Language-Processing\\Sapiens_ A Brief History of Hum - Yuval Noah Harari.txt"
+path3 <- "C:\\Tran Phu Hoa workspace\\1. Current\\1_NLP\\Natural-Language-Processing\\21 Lessons for the 21st Century - Yuval Noah Harari.txt"
+
+homo_deus <- readtext(path1)  
+sapiens <- readtext(path2)
+lessons <- readtext(path3)
+
+yuval_books <- bind_rows(homo_deus, sapiens, lessons)
+
+
+```
+
+```{r}
+tidy_yuval <- yuval_books %>% unnest_tokens(word,text)
+```
+
+```{r}
+tidy_yuval  %>% 
+    anti_join(stop_words) %>% 
+    count(doc_id,word, sort = TRUE) %>%
+    bind_tf_idf(word,doc_id,n) %>% 
+    select(-doc_id) %>%
+    arrange(desc(tf_idf))
+```
+
+```{r}
+#mystopwords <- tibble(word = c("www.â", "2017", "2016", "cortã", "2015", "bn", "file", "cg", "cb", "cm", "ab", "_k", "_k_", "_x"))
+
+#physics_words <- anti_join(physics_words, mystopwords, by = "word")
+
+plot_yuval <- tidy_yuval %>% 
+  anti_join(stop_words) %>% 
+  count(doc_id,word, sort = TRUE) %>%
+  bind_tf_idf(word,doc_id,n) %>%
+  mutate(word = str_remove_all(word, "_")) %>%
+  group_by(doc_id) %>% 
+  top_n(15, tf_idf) %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, tf_idf, doc_id)) %>%
+  mutate(author = factor(doc_id, levels = c("Homo Deus_ A Brief History of T - Yuval Noah Harari.txt",
+                                            "21 Lessons for the 21st Century - Yuval Noah Harari.txt",
+                                            "Sapiens_ A Brief History of Hum - Yuval Noah Harari.txt")))
+
+ggplot(plot_yuval, aes(word, tf_idf, fill = doc_id)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~doc_id, ncol = 2, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+```
+
+```{r}
+yuval_books %>% 
+  filter(str_detect(text, "2017")) %>% 
+  select(text)
+```
+
+```{r}
+library(forcats)
+
+plot_physics <- physics_words %>%
+  bind_tf_idf(word, author, n) %>%
+  mutate(word = fct_reorder(word, tf_idf)) %>%
+  mutate(author = factor(author, levels = c("Galilei, Galileo",
+                                            "Huygens, Christiaan", 
+                                            "Tesla, Nikola",
+                                            "Einstein, Albert")))
+```
+
+```{r}
+
+plot_physics %>% 
+  group_by(author) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, tf_idf)) %>%
+  ggplot(aes(word, tf_idf, fill = author)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~author, ncol = 2, scales = "free") +
+  coord_flip()
+```
+
+------
+28/04/2020
+
+Chapter 3 
+We want to answer how to quantify what a document is about
+
+To answer these questions we test this method:
+tf = term frequency
+idf = inverse document frequency = decreases the weight for commonly used words and increases the weight for words that are not used very much in a collection of documents
+
+tf - idf = The statistic tf-idf is intended to measure how important a word is to a document in a collection (or corpus) of documents, for example, to one novel in a collection of novels or to one website in a collection of websites.
+
+```{r}
+library(tidyverse)
+library(janeaustenr)
+library(tidytext)
+library(textdata)
+
+book_words <- austen_books() %>%
+  unnest_tokens(word, text) %>%
+  count(book, word, sort = TRUE)
+
+total_words <- book_words %>% 
+  group_by(book) %>% 
+  summarize(total = sum(n))
+
+book_words <- left_join(book_words, total_words)
+book_words
+```
+
+Zipf’s law states that the frequency that a word appears is inversely proportional to its rank.
+
+```{r}
+freq_by_rank <- book_words %>% 
+  group_by(book) %>% 
+  mutate(rank = row_number(), 
+         `term frequency` = n/total)
+
+freq_by_rank
+```
+
+```{r}
+freq_by_rank %>% 
+  ggplot(aes(rank, `term frequency`, color = book)) + 
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10()
+
+```
+
+```{r}
+rank_subset <- freq_by_rank %>% 
+  filter(rank < 500,
+         rank > 10)
+
+lm(log10(`term frequency`) ~ log10(rank), data = rank_subset)
+```
+
+
+```{r}
+freq_by_rank %>% 
+  ggplot(aes(rank, `term frequency`, color = book)) + 
+  geom_abline(intercept = -0.62, slope = -1.1, color = "gray50", linetype = 2) +
+  geom_line(size = 1.1, alpha = 0.8, show.legend = FALSE) + 
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+
+The idea of tf-idf is to find the important words for the content of each document by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in a collection or corpus of documents, in this case, the group of Jane Austen’s novels as a whole. Calculating tf-idf attempts to find the words that are important (i.e., common) in a text, but not too common
+
+```{r}
+book_words <- book_words %>%
+  bind_tf_idf(word, book, n)
+
+book_words
+```
+
+```{r}
+book_words %>%
+  select(-total) %>%
+  arrange(desc(tf_idf))
+```
+```{r}
+book_words %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word))))
+```
+
+
+```{r}
+book_words %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(book) %>% 
+  top_n(15) %>% 
+  ungroup()
+```
+
+```{r}
+book_words %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(book) %>% 
+  top_n(15) %>% 
+  ungroup() %>%
+  ggplot(aes(word, tf_idf, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~book, ncol = 2, scales = "free") +
+  coord_flip()
+```
+Still all proper nouns in Figure 3.4! These words are, as measured by tf-idf, the most important to each novel and most readers would likely agree. What measuring tf-idf has done here is show us that Jane Austen used similar language across her six novels, and what distinguishes one novel from the rest within the collection of her works are the proper nouns, the names of people and places. This is the point of tf-idf; it identifies words that are important to one document within a collection of documents.
+
+
+
+```{r}
+suppressMessages({
+  if(!require(gutenbergr))
+    install.packages("gutenbergr", repos = "http://cran.us.r-project.org")
+  library(gutenbergr)
+  
+})
+physics <- gutenberg_download(c(37729, 14725, 13476, 30155), 
+                              meta_fields = "author")
+```
+
+
+# To calculate and visulize relationships between words in my text dataset
+Tokenizing by n-gram
+
+We do this by adding the token = "ngrams" option to unnest_tokens(), and setting n to the number of words we wish to capture in each n-gram. When we set n to 2, we are examining pairs of two consecutive words, often called “bigrams”:
+```{r}
+austen_bigrams <- austen_books() %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+austen_bigrams
+```
+
+ Counting and filtering n-grams
+```{r}
+austen_bigrams %>%
+  count(bigram, sort = TRUE)
+```
+
+As one might expect, a lot of the most common bigrams are pairs of common (uninteresting) words, such as of the and to be: what we call “stop-words” (see Chapter 1). This is a useful time to use tidyr’s separate(), which splits a column into multiple based on a delimiter. This lets us separate it into two columns, “word1” and “word2”, at which point we can remove cases where either is a stop-word.
+
+```{r}
+bigrams_separated <- austen_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+# new bigram counts:
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+bigram_counts
+```
+
+
+```{r}
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+bigrams_united
+```
+
+In other analyses you may be interested in the most common trigrams, which are consecutive sequences of 3 words. We can find this by setting n = 3:
+
+```{r}
+austen_books() %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word,
+         !word3 %in% stop_words$word) %>%
+  count(word1, word2, word3, sort = TRUE)
+
+```
+
+
+```{r}
+bigrams_filtered %>%
+  filter(word2 == "street") %>%
+  count(book, word1, sort = TRUE)
+```
+
+A bigram can also be treated as a term in a document in the same way that we treated individual words. For example, we can look at the tf-idf (Chapter 3) of bigrams across Austen novels. These tf-idf values can be visualized within each book, just as we did for words (Figure 4.1).
+
+```{r}
+bigram_tf_idf <- bigrams_united %>%
+  count(book, bigram) %>%
+  bind_tf_idf(bigram, book, n) %>%
+  arrange(desc(tf_idf))
+
+bigram_tf_idf
+```
+
+```{r}
+not_words <- bigrams_separated %>%
+  filter(word1 == "not") %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>%
+  count(word2, value, sort = TRUE)
+
+not_words
+```
+
+
+
+```{r}
+not_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(20) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(word2, n * value, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  xlab("Words preceded by \"not\"") +
+  ylab("Sentiment value * number of occurrences") +
+  coord_flip()
+```
+
+```{r}
+negation_words <- c("not", "no", "never", "without")
+AFINN <- get_sentiments("afinn")
+negated_words <- bigrams_separated %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+negated_words
+```
+```{r}
+negated_words %>% select(word1) %>% distinct()
+```
+
+
+
+```{r}
+negated_words %>%
+  mutate(word1 = factor(word1, levels = unique(word1))) %>% 
+  group_by(word1) %>%
+  top_n(12) %>%
+  ungroup() %>%
+  mutate(contribution = n * value) %>%
+  mutate(word2 = reorder_within(word2, contribution, word1)) %>%
+  ggplot(aes(word2, contribution, fill = contribution > 0)) +
+  geom_col(show.legend = FALSE) +
+  xlab("Words preceded by \"not\"") +
+  ylab("Sentiment value * number of occurrences") +
+  facet_wrap(~ word1, ncol = 2, scales = "free", dir = "v") +
+  coord_flip() + 
+  scale_x_reordered()
+```
+
+
+---------
+20/04/2020
 
 ```{r}
 suppressMessages({
@@ -35,8 +604,39 @@ ap_topics <- tidy(ap_lda, matrix = "beta")
 ap_topics
 ```
 
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
 
+ap_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+  
 ```{r}
+library(ggplot2)
+library(dplyr)
 
+ap_top_terms <- ap_topics %>%
+  group_by(topic) %>%
+  top_n(10,beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+ap_top_terms
+
+ap_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
 ```
+
+
 
