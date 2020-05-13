@@ -2,6 +2,100 @@
 title: "R Notebook"
 output: html_notebook
 ---
+
+12/05/2020
+
+```{r}
+library(dplyr) # for data manipulation
+library(tidytext) # for manipulating text to tidy 1 term per row
+library(magrittr) # for aesing the code writing style
+library(tidyr) # to oadd spread() and gather() function
+library(topicmodels) # to do LDA for documents
+library(readtext)
+```
+
+
+```{r}
+wd <- getwd()
+path1 <- file.path(wd, "Homo Deus_ A Brief History of T - Yuval Noah Harari.txt")
+path2 <- file.path(wd,"Sapiens_ A Brief History of Hum - Yuval Noah Harari.txt")
+path3 <- file.path(wd, "21 Lessons for the 21st Century - Yuval Noah Harari.txt")
+
+homo <- readtext(path1)  
+sapiens <- readtext(path2)
+lessons <- readtext(path3)
+
+yuval_books <- bind_rows(homo, sapiens, lessons)
+yuval_books %<>% mutate(book = case_when(doc_id == "Homo Deus_ A Brief History of T - Yuval Noah Harari.txt" ~ "homo_dues",
+                                         doc_id == "Sapiens_ A Brief History of Hum - Yuval Noah Harari.txt" ~ "sapiens",
+                                         doc_id == "21 Lessons for the 21st Century - Yuval Noah Harari.txt" ~ "21_lessons")) %>%
+  select(-doc_id)
+  
+
+head(yuval_books)
+```
+
+
+```{r}
+yuval_word <- yuval_books %>% unnest_tokens(word, text)
+
+my_stop_words <- c("people", "human", "â", "humans", "world", "donâ", "itâ")
+word_counts <- yuval_word %>%
+  anti_join(stop_words) %>%
+  filter(!word %in% my_stop_words) %>%
+  count(book, word, sort = TRUE) %>%
+  ungroup()
+```
+
+```{r}
+chapters_dtm <- word_counts %>%
+  cast_dtm(book, word, n)
+
+chapters_dtm
+```
+
+
+```{r}
+chapters_lda <- LDA(chapters_dtm, k = 3, control = list(seed = 1234))
+chapters_lda
+```
+
+
+```{r}
+chapter_topics <- tidy(chapters_lda, matrix = "beta")
+chapter_topics
+```
+
+
+```{r}
+top_terms <- chapter_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms
+```
+
+
+```{r}
+library(ggplot2)
+
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+```
+
+```{r}
+assignments <- augment(chapters_lda, data = chapters_dtm)
+assignments
+```
+
+------
 08/05/2020
 
 ```{r}
